@@ -11,7 +11,7 @@ await mkdir(OUT, { recursive: true });
 // art/up/<name>.png when a super-resolution pass has produced one (scripts/upscale-art.*),
 // and from a Lanczos 2x with light sharpening otherwise.
 const { existsSync } = await import("node:fs");
-const plates = ["hero-plate", "build", "build-empty", "automate", "rest"];
+const plates = ["hero-plate", "build", "build-empty", "build-tall", "build-tall-empty", "automate", "rest"].filter((name) => existsSync(`${RAW}/${name}.png`));
 async function double(name) {
   const up = `art/up/${name}.png`;
   const { width } = await sharp(`${RAW}/${name}.png`).metadata();
@@ -233,4 +233,36 @@ if (existsSync(`${RAW}/room.png`)) {
     .joinChannel(await sharp(mask).extractChannel(0).raw().toBuffer(), { raw: { width: size, height: size, channels: 1 } })
     .png()
     .toFile("src/app/icon.png");
+}
+
+// Build: every part of the flat-lay must be able to appear on its own. Bake one sprite image
+// per composition: the photograph, opaque inside each part's box, fading to nothing over the
+// box's last few pixels, transparent everywhere else. (CSS masks did this before and cost
+// phones dearly.)
+{
+  const { readFileSync } = await import("node:fs");
+  const boxes = JSON.parse(readFileSync("src/content/build-parts.json", "utf8"));
+  const FEATHER = 9;
+  for (const [name, list] of [["build", boxes.wide], ["build-tall", boxes.tall]]) {
+    if (!existsSync(`${RAW}/${name}.png`)) continue;
+    for (const k of [1, 2]) {
+      const png = k === 1 ? await sharp(`${RAW}/${name}.png`).png().toBuffer() : await double(name);
+      const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width: W, height: H } = info;
+      const alpha = Buffer.alloc(W * H);
+      for (const [bx, by, bw, bh] of list) {
+        for (let y = by * k; y < (by + bh) * k; y++) {
+          for (let x = bx * k; x < (bx + bw) * k; x++) {
+            const edge = Math.min(x - bx * k, (bx + bw) * k - 1 - x, y - by * k, (by + bh) * k - 1 - y);
+            const a = Math.round(255 * Math.min(1, edge / (FEATHER * k)));
+            if (a > alpha[y * W + x]) alpha[y * W + x] = a;
+          }
+        }
+      }
+      await sharp(data, { raw: { width: W, height: H, channels: 3 } })
+        .joinChannel(alpha, { raw: { width: W, height: H, channels: 1 } })
+        .webp({ quality: 84, alphaQuality: 90 })
+        .toFile(`${OUT}/${name}-parts-${k}x.webp`);
+    }
+  }
 }

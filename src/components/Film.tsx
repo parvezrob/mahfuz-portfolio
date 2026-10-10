@@ -4,6 +4,7 @@ import { useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
+import parts from "@/content/build-parts.json";
 import { site } from "@/content/site";
 import { sound } from "@/lib/sound";
 
@@ -17,14 +18,10 @@ const HERO_FLOOR = 848; // where the blocks meet the floor
 const SUN = 0.42; // how far a shadow slides right for every pixel of height, read off the block shadows
 
 const BUILD = { w: 1536, h: 1024, ball: 76, land: [1325, 205] as const, exit: 1640 };
-// Every object in the flat-lay as [x, y, width, height], shadow included, in the order it is
-// set down: the four blocks, the two rails, the four posts, the three hoops.
-const PARTS: readonly (readonly [number, number, number, number])[] = [
-  [576, 54, 180, 472], [794, 144, 180, 382], [1014, 241, 182, 285], [1236, 336, 186, 190],
-  [576, 558, 850, 56], [576, 629, 850, 56],
-  [580, 714, 62, 196], [658, 714, 62, 196], [736, 714, 62, 196], [812, 714, 64, 196],
-  [890, 740, 160, 166], [1044, 720, 192, 204], [1226, 690, 244, 250],
-];
+// Every object in each flat-lay as [x, y, width, height], shadow included, in the order it is
+// set down (blocks, rails, posts, hoops). The same file tells the asset script what to cut out.
+type Box = readonly [number, number, number, number];
+const PARTS = parts.wide as unknown as readonly Box[];
 
 const AUTO = { w: 1536, h: 1024, from: -90, to: 1640 };
 const AUTO_RAIL: readonly (readonly [number, number])[] = [
@@ -57,6 +54,16 @@ function along(value: number, from: 0 | 1) {
   }
   return CUT[CUT.length - 1][to];
 }
+
+// The same scene composed for a tall screen: its own photograph, part boxes and landing spot.
+const BUILD_TALL = {
+  w: 1024,
+  h: 1536,
+  ball: 68,
+  land: [826, 505] as const,
+  exit: 1130,
+  parts: parts.tall as unknown as readonly Box[],
+};
 
 // How large the ball has to grow to flood the whole window with red from anywhere on screen.
 const FLOOD = 72;
@@ -154,12 +161,15 @@ export function Film() {
   const autoStage = useRef<HTMLDivElement>(null);
   const autoBall = useRef<HTMLDivElement>(null);
   const gate = useRef<HTMLDivElement>(null);
-  const buildWash = useRef<HTMLDivElement>(null);
+  const tallStage = useRef<HTMLDivElement>(null);
+  const tallBall = useRef<HTMLDivElement>(null);
+  const tallShadow = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
       const q = gsap.utils.selector(root);
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const tallScreen = window.innerWidth < 900;
 
       // --- Per-scene renderers: one number in, the whole physical state out. ---
 
@@ -167,6 +177,8 @@ export function Film() {
       let centres: number[] | null = null;
       ScrollTrigger.addEventListener("refreshInit", () => (centres = null));
 
+      const ripple = window.matchMedia("(pointer: fine)").matches;
+      const nameLeft = () => q<HTMLElement>(".hero-name")[0]?.getBoundingClientRect().left ?? 0;
       let lastHeroX = HERO.from;
       let lastAutoX = AUTO.from;
       let hoopsPassed = 0;
@@ -185,7 +197,8 @@ export function Film() {
           "--flat": clamp01((s - 8) / 10),
           "--clip": leap > 0 ? "none" : HERO_CLIP,
         });
-        setVars(heroStage.current, { "--cam": camFor(heroStage.current, cx / HERO.w), "--zoom": 1 + 0.05 * roll });
+        const cam = camFor(heroStage.current, cx / HERO.w);
+        setVars(heroStage.current, { "--cam": cam, "--zoom": 1 + 0.05 * roll });
 
         // A real cast shadow: it tightens, darkens and closes in as the ball loses height.
         const height = HERO_FLOOR - (cy + HERO.ball / 2);
@@ -194,18 +207,19 @@ export function Film() {
           "--y": (HERO_FLOOR + 6) / HERO.h,
           "--sc": 1 + height / 240,
           "--o": Math.max(0, 0.4 - height / 950) * (1 - clamp01(leap * 3)),
-          "--b": `${2 + height / 36}px`,
         });
 
         sound.roll(leap > 0 ? 0 : clamp01(Math.abs(cx - lastHeroX) / 14));
         sound.swell(leap);
         lastHeroX = cx;
 
-        // The name feels the ball go by: the letters above it ride up over it like a bump, then settle.
-        const ballBox = heroBall.current?.getBoundingClientRect();
-        if (!ballBox || !letters.length) return;
-        if (!centres) centres = letters.map((el) => el.getBoundingClientRect().left + el.offsetWidth / 2);
-        const ballX = ballBox.left + ballBox.width / 2;
+        // The name feels the ball go by: the letters above it ride up over it like a bump, then
+        // settle. Re-shaping fifteen glyphs a frame is too much for a phone, so touch screens skip
+        // it; and the ball's screen position is worked out from numbers, never read from layout.
+        if (!ripple || !letters.length) return;
+        const stageWidth = heroStage.current?.offsetWidth ?? window.innerWidth;
+        const ballX = (cx / HERO.w) * stageWidth - (stageWidth - window.innerWidth) * cam;
+        if (!centres) centres = letters.map((el) => el.offsetLeft + el.offsetWidth / 2 + nameLeft());
         const reach = window.innerWidth * 0.12;
         const strength = clamp01(roll * 14) * (1 - clamp01(leap * 4));
         letters.forEach((el, i) => {
@@ -219,19 +233,19 @@ export function Film() {
       const renderBuild = (fall: number, hop: number, out: number) => {
         const s = FLOOD ** (1 - fall);
         const lift = clamp01((s - 1) / 5) + Math.sin(hop * Math.PI) * 0.16;
-        const cx = lerp(BUILD.land[0], BUILD.exit, out * out);
-        const pos = { "--x": cx / BUILD.w, "--y": BUILD.land[1] / BUILD.h };
-        setVars(buildBall.current, {
-          ...pos,
-          "--s": s * (1 + Math.sin(hop * Math.PI) * 0.07),
-          "--flat": clamp01((s - 8) / 10),
-        });
-        setVars(buildShadow.current, { ...pos, "--lift": lift });
+        // Two compositions share one performance: the wide flat-lay and the tall-screen one.
+        for (const [G, stage, ball, shadow] of [
+          [BUILD, buildStage.current, buildBall.current, buildShadow.current],
+          [BUILD_TALL, tallStage.current, tallBall.current, tallShadow.current],
+        ] as const) {
+          const cx = lerp(G.land[0], G.exit, out * out);
+          const pos = { "--x": cx / G.w, "--y": G.land[1] / G.h };
+          setVars(ball, { ...pos, "--s": s * (1 + Math.sin(hop * Math.PI) * 0.07), "--flat": clamp01((s - 8) / 10) });
+          setVars(shadow, { ...pos, "--lift": lift });
+          setVars(stage, { "--zoom": 1.06 - 0.06 * fall });
+        }
         if (fall >= 1 && !landed) sound.thud(0.7);
         landed = fall >= 1;
-        setVars(buildStage.current, { "--cam": camFor(buildStage.current, BUILD.land[0] / BUILD.w), "--zoom": 1.06 - 0.06 * fall });
-        // The tall-screen wash under the copy must not cut across the red while it still fills the frame.
-        if (buildWash.current) buildWash.current.style.opacity = String(clamp01((fall - 0.45) / 0.3));
       };
 
       const verbs = q<HTMLElement>(".auto-copy .verb");
@@ -248,7 +262,6 @@ export function Film() {
           "--y": (autoFloor(cx + SUN * height) + 10) / AUTO.h,
           "--sc": 1 + height / 300,
           "--o": Math.max(0, 0.42 - height / 1000),
-          "--b": `${3 + height / 30}px`,
         });
         sound.roll(clamp01(Math.abs(cx - lastAutoX) / 16));
         lastAutoX = cx;
@@ -311,6 +324,19 @@ export function Film() {
       const patience = new Promise((resolve) => setTimeout(resolve, 3500));
       Promise.race([loaded, patience]).then(() => (reduced ? intro.progress(1) : intro.play()));
 
+      // The later scenes' photographs are decoded now, while the hero plays, so that no cut
+      // has to wait on an image decode (that wait is a dropped frame or three on a phone).
+      const warm = () => {
+        q<HTMLImageElement>("img.plate").forEach((img) => img.decode?.().catch(() => undefined));
+        const sprite = getComputedStyle(q(tallScreen ? ".build-part-tall" : ".build-part")[0] ?? document.body).backgroundImage.match(/url\("?([^")]+)/)?.[1];
+        if (sprite) {
+          const img = new Image();
+          img.src = sprite;
+          img.decode().catch(() => undefined);
+        }
+      };
+      Promise.race([loaded, patience]).then(() => setTimeout(warm, 1200));
+
       // Every start state is now set, so the stage can show itself (it is hidden in CSS until here).
       gate.current?.style.setProperty("opacity", "1");
 
@@ -330,7 +356,7 @@ export function Film() {
       const drawHero = () => renderHero(hero.roll, hero.leap);
       const drawBuild = () => renderBuild(build.fall, build.hop, build.out);
 
-      const autoCopyAt = window.innerWidth < 900 ? 88.5 : 77;
+      const autoCopyAt = tallScreen ? 88.5 : 77;
 
       const tl = gsap.timeline({ paused: true, defaults: { ease: "none" } });
       // The section is tall and its stage is position: sticky, so the browser holds the frame
@@ -425,12 +451,18 @@ export function Film() {
         .set(document.documentElement, { "--nav-r": INK }, 53.4)
         .to(build, { hop: 1, duration: 2.2, onUpdate: drawBuild }, 58)
         .from(q(".build-copy .word"), { yPercent: 130, duration: 2.4, stagger: 0.2, ease: "power3.out" }, 57)
-        .fromTo(q(".build-copy h2"), { "--wdth": 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, 57)
+        .fromTo(q(".build-copy h2"), { "--wdth": tallScreen ? 125 : 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, 57)
         .from(q(".build-copy .fade"), { autoAlpha: 0, y: 16, duration: 2, stagger: 0.3, ease: "power2.out" }, 59)
-        // Build builds: the thirteen parts are set down one after another around the ball.
+        // Build builds: the thirteen parts are set down one after another around the ball. Both
+        // compositions run the same sequence; only the one on screen makes the sound.
         .from(
-          q(".build-part"),
-          { autoAlpha: 0, scale: 1.08, y: -12, duration: 1.2, ease: "power3.out", stagger: { each: 0.52, onStart: () => sound.thud(0.22) } },
+          q(".build-part:not(.build-part-tall)"),
+          { autoAlpha: 0, scale: 1.08, y: -12, duration: 1.2, ease: "power3.out", stagger: { each: 0.52, onStart: () => !tallScreen && sound.thud(0.22) } },
+          58.6,
+        )
+        .from(
+          q(".build-part-tall"),
+          { autoAlpha: 0, scale: 1.08, y: -12, duration: 1.2, ease: "power3.out", stagger: { each: 0.52, onStart: () => tallScreen && sound.thud(0.22) } },
           58.6,
         )
         .to(build, { out: 1, duration: 5, onUpdate: drawBuild }, 66.4)
@@ -443,7 +475,7 @@ export function Film() {
         .set(buildLayer.current, { autoAlpha: 0 }, 75.7)
         .to(auto, { run: 1, duration: 27.6, onUpdate: () => renderAuto(auto.run) }, 75.2)
         .from(q(".auto-copy .word"), { yPercent: 130, duration: 2.4, stagger: 0.2, ease: "power3.out" }, autoCopyAt)
-        .fromTo(q(".auto-copy h2"), { "--wdth": 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, autoCopyAt)
+        .fromTo(q(".auto-copy h2"), { "--wdth": tallScreen ? 125 : 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, autoCopyAt)
         .from(q(".auto-copy .fade"), { autoAlpha: 0, y: 16, duration: 2, stagger: 0.3, ease: "power2.out" }, autoCopyAt + 2)
         // Hold the last frame: the Grow scene dissolves in over it (see Grow.tsx), so there is no blank beat.
         .to({}, { duration: 0.5 }, 102);
@@ -537,32 +569,18 @@ export function Film() {
 
       {/* Build */}
       <div ref={buildLayer} className="layer">
-        <div ref={buildStage} className="stage" style={{ "--ar": BUILD.w / BUILD.h } as React.CSSProperties}>
-          {/* The surface starts empty; each part is laid on it in turn. */}
-          <Plate name="build-empty" w={BUILD.w} />
-          {PARTS.map(([x, y, w, h], i) => (
-            <div
-              key={i}
-              className="build-part"
-              style={{
-                left: `${(x / BUILD.w) * 100}%`,
-                top: `${(y / BUILD.h) * 100}%`,
-                width: `${(w / BUILD.w) * 100}%`,
-                height: `${(h / BUILD.h) * 100}%`,
-                backgroundSize: `${(BUILD.w / w) * 100}% ${(BUILD.h / h) * 100}%`,
-                backgroundPosition: `${(x / (BUILD.w - w)) * 100}% ${(y / (BUILD.h - h)) * 100}%`,
-              }}
-            />
-          ))}
-          <div ref={buildShadow} className="ball-shadow" style={{ "--d": BUILD.ball / BUILD.w } as React.CSSProperties} />
-          <div ref={buildBall} className="ball" style={{ "--d": BUILD.ball / BUILD.w } as React.CSSProperties}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/art/ball.webp" alt="" />
-            <i />
-          </div>
+        <div ref={buildStage} className="stage max-md:hidden" style={{ "--ar": BUILD.w / BUILD.h } as React.CSSProperties}>
+          <BuildSet plate="build" G={{ ...BUILD, parts: PARTS }} ball={buildBall} shadow={buildShadow} />
         </div>
-        <div ref={buildWash} className="absolute inset-x-0 bottom-0 h-[62lvh] bg-[linear-gradient(to_top,var(--color-paper)_78%,transparent)] md:hidden" />
-        <ActCopy act={build} className="build-copy left-[5vw] top-1/2 w-[min(31vw,30rem)] -translate-y-1/2 max-md:bottom-[9lvh] max-md:top-auto max-md:w-[84vw] max-md:translate-y-0" />
+        {/* Tall screens: the plate spans the width and stands at the top; its lower edge feathers into the page. */}
+        <div
+          ref={tallStage}
+          className="tall-stage absolute top-[5lvh] md:hidden"
+          style={{ aspectRatio: `${BUILD_TALL.w} / ${BUILD_TALL.h}` }}
+        >
+          <BuildSet plate="build-tall" G={BUILD_TALL} ball={tallBall} shadow={tallShadow} tall />
+        </div>
+        <ActCopy act={build} className="build-copy left-[5vw] top-1/2 w-[min(31vw,30rem)] -translate-y-1/2 max-md:bottom-[7lvh] max-md:top-auto max-md:w-[84vw] max-md:translate-y-0" />
       </div>
 
       {/* Automate */}
@@ -577,6 +595,51 @@ export function Film() {
       </div>
       </div>
     </section>
+  );
+}
+
+// One composition of the Build scene: the empty surface, every part cut from the full
+// photograph so it can be set down on its own, and the ball with its shadow.
+function BuildSet({
+  plate,
+  G,
+  ball,
+  shadow,
+  tall,
+}: {
+  plate: string;
+  G: { w: number; h: number; ball: number; parts: readonly Box[] };
+  ball: React.Ref<HTMLDivElement>;
+  shadow: React.Ref<HTMLDivElement>;
+  tall?: boolean;
+}) {
+  return (
+    <>
+      {/* The photograph and its parts fade out at the edges on a tall screen; the ball must not, or the red could not fill the frame. */}
+      <div className={`absolute inset-0 ${tall ? "tall-fade" : ""}`}>
+        <Plate name={`${plate}-empty`} w={G.w} />
+        {G.parts.map(([x, y, w, h], i) => (
+          <div
+            key={i}
+            className={`build-part ${tall ? "build-part-tall" : ""}`}
+            style={{
+              left: `${(x / G.w) * 100}%`,
+              top: `${(y / G.h) * 100}%`,
+              width: `${(w / G.w) * 100}%`,
+              height: `${(h / G.h) * 100}%`,
+              backgroundSize: `${(G.w / w) * 100}% ${(G.h / h) * 100}%`,
+              backgroundPosition: `${(x / (G.w - w)) * 100}% ${(y / (G.h - h)) * 100}%`,
+            }}
+          />
+        ))}
+      </div>
+      <div ref={shadow} className="ball-shadow" style={{ "--d": G.ball / G.w } as React.CSSProperties} />
+      <div ref={ball} className="ball" style={{ "--d": G.ball / G.w } as React.CSSProperties}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/art/ball.webp" alt="" />
+        <i />
+      </div>
+    </>
   );
 }
 

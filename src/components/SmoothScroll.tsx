@@ -31,6 +31,12 @@ export function SmoothScroll() {
     };
     document.addEventListener("click", onAnchor);
 
+    // Scroll positions are measured early; measure again once everything that can change the
+    // page's height (late images, the web font) has actually arrived.
+    const remeasure = () => ScrollTrigger.refresh();
+    window.addEventListener("load", remeasure);
+    document.fonts.ready.then(remeasure);
+
     // "Play the film": run the pinned film at the pace it was cut for. Any wheel or touch takes over.
     const onPlay = () => {
       const film = document.querySelector<HTMLElement>("#top");
@@ -44,6 +50,7 @@ export function SmoothScroll() {
 
     return () => {
       document.removeEventListener("click", onAnchor);
+      window.removeEventListener("load", remeasure);
       document.removeEventListener("film:play", onPlay);
       gsap.ticker.remove(tick);
       lenis.destroy();

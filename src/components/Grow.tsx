@@ -92,8 +92,10 @@ export function Grow() {
       const build = () => {
         w = view.clientWidth;
         h = view.clientHeight;
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const small = w < 900;
+        // A phone's GPU is better spent on frame rate than on a third of a pixel of sharpness.
+        const dpr = Math.min(window.devicePixelRatio || 1, small ? 1.5 : 2);
+        const cell = small ? 9 : CELL;
         radius = Math.max(13, Math.min(w * 0.0165, 28));
         quota = reduced ? 0 : Math.round(Math.max(34, Math.min((w * h) / 16500, 96)));
 
@@ -149,14 +151,14 @@ export function Grow() {
         engine = Engine.create({ gravity: { x: 0, y: 1.15 } });
         balls = [];
         const statics: Matter.Body[] = [];
-        for (let y = CELL / 2; y < h; y += CELL) {
+        for (let y = cell / 2; y < h; y += cell) {
           let run = -1;
-          for (let x = CELL / 2; x <= w + CELL; x += CELL) {
+          for (let x = cell / 2; x <= w + cell; x += cell) {
             const on = x < w && solid(x, y);
             if (on && run < 0) run = x;
             if (!on && run >= 0) {
               const width = x - run;
-              statics.push(Bodies.rectangle(run - CELL / 2 + width / 2, y, width, CELL, { isStatic: true }));
+              statics.push(Bodies.rectangle(run - cell / 2 + width / 2, y, width, cell, { isStatic: true }));
               run = -1;
             }
           }

@@ -41,15 +41,19 @@ export function About() {
       {/* One portrait for every screen: full height beside the text on wide screens, a tall band above it on phones. */}
       <div className="about-set relative h-[66lvh] overflow-hidden [--vh:66lvh] md:absolute md:inset-0 md:h-auto md:[--vh:100lvh]">
         <div className="about-iris stage" style={{ "--ar": SET.w / SET.h, "--ay": SET.headroom, "--cam": SET.cam } as React.CSSProperties}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            className="plate"
-            src={SET.src}
-            srcSet={`${SET.src} ${SET.w}w, ${SET.src.replace(".webp", "-2x.webp")} ${SET.w * 2}w`}
-            sizes="(max-width: 899px) 100lvh, max(100vw, 150lvh)"
-            alt={`${site.name.first} ${site.name.last}`}
-            loading="lazy"
-          />
+          {/* Phones get the 1x file; the 2x portrait is three thousand pixels wide and only costs them memory. */}
+          <picture>
+            <source media="(max-width: 899px)" srcSet={SET.src} />
+            { }
+            <img
+              className="plate"
+              src={SET.src}
+              srcSet={`${SET.src} ${SET.w}w, ${SET.src.replace(".webp", "-2x.webp")} ${SET.w * 2}w`}
+              sizes="max(100vw, 150lvh)"
+              alt={`${site.name.first} ${site.name.last}`}
+              loading="lazy"
+            />
+          </picture>
         </div>
         <div className="absolute inset-x-0 bottom-0 h-[15%] bg-gradient-to-t from-paper to-transparent" />
       </div>

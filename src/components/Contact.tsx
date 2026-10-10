@@ -89,12 +89,22 @@ export function Contact() {
         return;
       }
 
-      gsap
-        .timeline({ scrollTrigger: { trigger: root.current, start: "top 35%", toggleActions: "play none none reset" } })
+      // Started by visibility, not by a cached scroll position: on phones the page's height
+      // can settle after scroll positions were measured, and this scene must never be missed.
+      const play = gsap
+        .timeline({ paused: true })
         .to(state, { t: 1, duration: 1.5, ease: "none", onUpdate: () => render(state.t) })
         .to(state, { t: 2, duration: 3.4, ease: "none", onUpdate: () => render(state.t) })
-        .from(q(".contact-word .word"), { yPercent: 130, duration: 1.3, stagger: 0.08, ease: "expo.out" }, 0.2)
-        .from(q(".contact-fade, .contact-word"), { autoAlpha: 0, y: 18, duration: 1, stagger: 0.08, ease: "power3.out" }, 0.9);
+        .from(q(".contact-fade"), { autoAlpha: 0, y: 18, duration: 1, stagger: 0.08, ease: "power3.out" }, 0.6);
+      const watcher = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.intersectionRatio > 0.4) play.play();
+          else if (!entry.isIntersecting) play.pause(0);
+        },
+        { threshold: [0, 0.4] },
+      );
+      if (root.current) watcher.observe(root.current);
+      return () => watcher.disconnect();
     },
     { scope: root },
   );
@@ -104,15 +114,19 @@ export function Contact() {
   return (
     <section ref={root} id="contact" className="relative h-lvh min-h-[34rem] overflow-hidden">
       <div ref={stage} className="stage" style={{ "--ar": REST.w / REST.h, "--ay": 0.78 } as React.CSSProperties}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          className="plate"
-          src="/art/rest-1x.webp"
-          srcSet={`/art/rest-1x.webp ${REST.w}w, /art/rest-2x.webp ${REST.w * 2}w`}
-          sizes="max(100vw, 150svh)"
-          alt=""
-          loading="lazy"
-        />
+        { }
+        <picture>
+          <source media="(max-width: 899px)" srcSet="/art/rest-1x.webp" />
+          { }
+          <img
+            className="plate"
+            src="/art/rest-1x.webp"
+            srcSet={`/art/rest-1x.webp ${REST.w}w, /art/rest-2x.webp ${REST.w * 2}w`}
+            sizes="max(100vw, 150lvh)"
+            alt=""
+            loading="lazy"
+          />
+        </picture>
         <div
           ref={shadow}
           className="absolute rounded-[50%]"
@@ -129,8 +143,19 @@ export function Contact() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/art/ball.webp" alt="" />
         </div>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="plate" src="/art/rest-1x.webp" srcSet={`/art/rest-1x.webp ${REST.w}w, /art/rest-2x.webp ${REST.w * 2}w`} sizes="max(100vw, 150lvh)" alt="" loading="lazy" style={{ clipPath: LIP }} />
+        <picture>
+          <source media="(max-width: 899px)" srcSet="/art/rest-1x.webp" />
+          { }
+          <img
+            className="plate"
+            src="/art/rest-1x.webp"
+            srcSet={`/art/rest-1x.webp ${REST.w}w, /art/rest-2x.webp ${REST.w * 2}w`}
+            sizes="max(100vw, 150lvh)"
+            alt=""
+            loading="lazy"
+            style={{ clipPath: LIP }}
+          />
+        </picture>
       </div>
 
       {/* The photographed wall is a shade off the page colour; feather the join. */}
