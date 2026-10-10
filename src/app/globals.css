@@ -1,0 +1,199 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-paper: #dbd3c7;
+  --color-ink: #1b1815;
+  --color-red: #c8301e;
+  --color-cream: #f4ecdf;
+  --color-brass: #96783f;
+  --font-sans: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  --nav: #1b1815;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+::selection {
+  background: var(--color-red);
+  color: var(--color-cream);
+}
+
+/* Lenis */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+/* Type. Archivo carries a width axis; wide for display, normal for reading. */
+.display {
+  font-variation-settings: "wdth" var(--wdth, 118);
+  font-weight: 760;
+  line-height: 0.86;
+  letter-spacing: -0.035em;
+}
+.reading {
+  font-variation-settings: "wdth" 100;
+  font-weight: 430;
+  line-height: 1.28;
+  letter-spacing: -0.012em;
+}
+.small {
+  font-variation-settings: "wdth" 104;
+  font-weight: 520;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  letter-spacing: 0.005em;
+}
+
+/* A plate that always covers the viewport. Children are placed in fractions of the
+   plate, so the animated ball stays registered to the photograph at any window size.
+   --cam pans a plate that is wider than the window; --ay anchors one that is taller. */
+.stage {
+  --ar: 1.5;
+  --cam: 0.5;
+  --ay: 0.5;
+  --zoom: 1;
+  --w: max(100vw, calc(100svh * var(--ar)));
+  --h: max(100svh, calc(100vw / var(--ar)));
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--w);
+  height: var(--h);
+  transform: translate(
+      calc(-50% - (var(--w) - 100vw) * (var(--cam) - 0.5)),
+      calc(-50% - (var(--h) - 100svh) * (var(--ay) - 0.5))
+    )
+    scale(var(--zoom));
+  will-change: transform;
+}
+.stage > img.plate {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* The ball is sized, never transform-scaled: a scaled layer is a stretched bitmap with a
+   ragged rim, while a resized circle is redrawn sharp at every size. */
+.ball {
+  --x: 0.5;
+  --y: 0.5;
+  --d: 0.0467;
+  --s: 1;
+  --flat: 0;
+  --up: 0;
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  top: calc(var(--y) * 100%);
+  width: calc(var(--d) * var(--s) * 100%);
+  aspect-ratio: 1;
+  transform: translate(-50%, calc(-50% - var(--up) * 100%));
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ball > img,
+.ball > i {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.ball > i {
+  background: var(--color-red);
+  opacity: var(--flat);
+}
+.ball-shadow {
+  --x: 0.5;
+  --y: 0.5;
+  --d: 0.0467;
+  --lift: 0;
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  top: calc(var(--y) * 100%);
+  width: calc(var(--d) * 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(60 42 28 / 0.55), rgb(60 42 28 / 0) 100%);
+  transform: translate(calc(-50% + 16% + var(--lift) * 60%), calc(-50% + 20% + var(--lift) * 75%))
+    scale(calc(1.08 + var(--lift) * 0.9));
+  opacity: calc(0.85 - var(--lift) * 0.6);
+  filter: blur(calc(1px + var(--lift) * 10px));
+  pointer-events: none;
+}
+
+/* The ball's cast shadow on the studio floor; the scene script moves and softens it. */
+.floor-shadow {
+  --x: 0.5;
+  --y: 0.9;
+  --d: 0.07;
+  --sc: 1;
+  --o: 0;
+  --b: 4px;
+  position: absolute;
+  left: calc(var(--x) * 100%);
+  top: calc(var(--y) * 100%);
+  width: calc(var(--d) * 100%);
+  aspect-ratio: 3.4;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(58 40 26 / 0.62), rgb(58 40 26 / 0));
+  transform: translate(-50%, -50%) scale(var(--sc));
+  opacity: var(--o);
+  filter: blur(var(--b));
+  pointer-events: none;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Words that rise out of a clipped line. */
+.line-mask {
+  display: block;
+  overflow: clip;
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+.word {
+  display: inline-block;
+  will-change: transform;
+}
+
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.11;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
