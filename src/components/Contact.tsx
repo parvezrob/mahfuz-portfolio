@@ -5,11 +5,23 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { site } from "@/content/site";
+import { sound } from "@/lib/sound";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
 // rest.png, in its own pixel space: the near rail, where it ends, and the carved dish.
-const REST = { w: 1536, h: 1024, ball: 184, railEnd: 792, dish: [989, 679] as const, reach: 150 };
+const REST = { w: 1536, h: 1024, ball: 184, railEnd: 792, dish: [989, 704] as const, reach: 150 };
+// The dish's rim as an ellipse. Everything below its near half is redrawn in front of the
+// ball, so the ball sits down in the dish instead of perching on it.
+const RIM = { cx: 989, cy: 753, rx: 199, ry: 35 };
+const LIP = (() => {
+  const pts: string[] = [];
+  for (let i = 0; i <= 24; i++) {
+    const a = Math.PI - (Math.PI * i) / 24;
+    pts.push(`${(((RIM.cx + RIM.rx * Math.cos(a)) / REST.w) * 100).toFixed(2)}% ${(((RIM.cy + RIM.ry * Math.sin(a)) / REST.h) * 100).toFixed(2)}%`);
+  }
+  return `polygon(0% ${(((RIM.cy) / REST.h) * 100).toFixed(2)}%, ${pts.join(", ")}, 100% ${((RIM.cy / REST.h) * 100).toFixed(2)}%, 100% 100%, 0% 100%)`;
+})();
 const restRail = (cx: number) => 571.5 + 0.2316 * (cx - 10);
 const REST_CLIP = "polygon(0 0, 100% 0, 100% 100%, 88% 100%, 0 78%)";
 
@@ -51,12 +63,16 @@ export function Contact() {
       };
 
       // t runs 0..1 down the rail, then 1..2 while the ball rocks to a stop in the dish.
+      let settled = false;
       const render = (t: number) => {
         if (t <= 1) {
+          settled = false;
           const cx = -REST.ball + (REST.railEnd + REST.ball) * (0.25 * t + 0.75 * t * t);
           place(cx, restRail(cx) - REST.ball / 2 + 14, true, 0);
           return;
         }
+        if (!settled) sound.thud(0.55);
+        settled = true;
         const u = t - 1;
         const startX = REST.railEnd - REST.dish[0];
         const dx = startX * Math.exp(-3.6 * u) * Math.cos(u * Math.PI * 5.2);
@@ -86,7 +102,7 @@ export function Contact() {
   const items = links();
 
   return (
-    <section ref={root} id="contact" className="grain relative h-svh min-h-[34rem] overflow-hidden">
+    <section ref={root} id="contact" className="relative h-lvh min-h-[34rem] overflow-hidden">
       <div ref={stage} className="stage" style={{ "--ar": REST.w / REST.h, "--ay": 0.78 } as React.CSSProperties}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -113,6 +129,8 @@ export function Contact() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/art/ball.webp" alt="" />
         </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="plate" src="/art/rest-1x.webp" srcSet={`/art/rest-1x.webp ${REST.w}w, /art/rest-2x.webp ${REST.w * 2}w`} sizes="max(100vw, 150lvh)" alt="" loading="lazy" style={{ clipPath: LIP }} />
       </div>
 
       {/* The photographed wall is a shade off the page colour; feather the join. */}
@@ -127,22 +145,26 @@ export function Contact() {
           ))}
         </h2>
         {items.length > 0 && (
-          <ul className="mt-[2.4vw] flex flex-wrap items-center gap-x-[2.6vw] gap-y-3">
-            {items.map((item, i) => (
-              <li key={item.label} className="contact-fade">
-                <a
-                  href={item.href}
-                  className={
-                    i === 0
-                      ? "reading inline-flex items-center gap-3 rounded-full bg-ink px-7 py-4 text-[clamp(1rem,1.3vw,1.3rem)] text-cream transition-colors duration-300 hover:bg-red"
-                      : "reading border-b border-ink/40 pb-1 text-[clamp(1rem,1.3vw,1.3rem)] transition-colors duration-300 hover:border-red hover:text-red"
-                  }
-                >
-                  {item.label}
-                </a>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-[2.4vw] flex flex-wrap items-center gap-x-[2.6vw] gap-y-5 max-md:mt-6">
+            <a
+              href={items[0].href}
+              className="contact-fade label inline-flex items-center rounded-full bg-ink px-7 py-4 text-[clamp(1rem,1.2vw,1.25rem)] text-cream transition-colors duration-300 hover:bg-red"
+            >
+              {items[0].label}
+            </a>
+            <ul className="flex items-center gap-x-[clamp(1.25rem,2.6vw,2.6rem)]">
+              {items.slice(1).map((item) => (
+                <li key={item.label} className="contact-fade">
+                  <a
+                    href={item.href}
+                    className="label border-b border-ink/40 pb-1 text-[clamp(1rem,1.2vw,1.25rem)] transition-colors duration-300 hover:border-red hover:text-red"
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

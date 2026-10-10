@@ -6,6 +6,8 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
 
 gsap.registerPlugin(ScrollTrigger);
+// A phone's address bar sliding away is not a real resize; recalculating on it makes scenes jump.
+ScrollTrigger.config({ ignoreMobileResize: true });
 
 // One scroll clock for the whole page: Lenis eases the wheel, GSAP's ticker drives Lenis,
 // and ScrollTrigger reads the eased position, so pinned scenes never fight the scroll.
@@ -29,8 +31,20 @@ export function SmoothScroll() {
     };
     document.addEventListener("click", onAnchor);
 
+    // "Play the film": run the pinned film at the pace it was cut for. Any wheel or touch takes over.
+    const onPlay = () => {
+      const film = document.querySelector<HTMLElement>("#top");
+      const after = document.querySelector<HTMLElement>("#grow");
+      if (!film || !after) return;
+      const end = after.getBoundingClientRect().top + window.scrollY;
+      const remaining = Math.max(0, end - window.scrollY);
+      lenis.scrollTo(end, { duration: Math.max(6, (remaining / window.innerHeight) * 4.1), easing: (t: number) => t });
+    };
+    document.addEventListener("film:play", onPlay);
+
     return () => {
       document.removeEventListener("click", onAnchor);
+      document.removeEventListener("film:play", onPlay);
       gsap.ticker.remove(tick);
       lenis.destroy();
     };

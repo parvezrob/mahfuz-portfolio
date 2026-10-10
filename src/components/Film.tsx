@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { site } from "@/content/site";
+import { sound } from "@/lib/sound";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -16,6 +17,14 @@ const HERO_FLOOR = 848; // where the blocks meet the floor
 const SUN = 0.42; // how far a shadow slides right for every pixel of height, read off the block shadows
 
 const BUILD = { w: 1536, h: 1024, ball: 76, land: [1325, 205] as const, exit: 1640 };
+// Every object in the flat-lay as [x, y, width, height], shadow included, in the order it is
+// set down: the four blocks, the two rails, the four posts, the three hoops.
+const PARTS: readonly (readonly [number, number, number, number])[] = [
+  [576, 54, 180, 472], [794, 144, 180, 382], [1014, 241, 182, 285], [1236, 336, 186, 190],
+  [576, 558, 850, 56], [576, 629, 850, 56],
+  [580, 714, 62, 196], [658, 714, 62, 196], [736, 714, 62, 196], [812, 714, 64, 196],
+  [890, 740, 160, 166], [1044, 720, 192, 204], [1226, 690, 244, 250],
+];
 
 const AUTO = { w: 1536, h: 1024, from: -90, to: 1640 };
 const AUTO_RAIL: readonly (readonly [number, number])[] = [
@@ -28,10 +37,33 @@ const AUTO_HOOPS = [
   { x: 1337, top: 529 },
 ] as const;
 const autoFloor = (cx: number) => 736 + 0.1615 * (cx - 210);
-const AUTO_CLIP = "polygon(0 0, 100% 0, 100% 100%, 83.5% 100%, 0 73.1%)";
+
+// Scroll does not map to film time evenly: each beat gets the scroll length it earns, and
+// empty beats (the red before the words, the red after them) get almost none.
+// [screens scrolled, film time]
+const CUT: readonly (readonly [number, number])[] = [
+  [0, 0], [1.45, 24], [2.2, 30.6], [2.26, 31.4], [3.95, 49.2], [4.0, 50],
+  [6.1, 71.2], [6.5, 75.7], [9.0, 102], [9.6, 102.5],
+];
+const SCREENS = CUT[CUT.length - 1][0];
+function along(value: number, from: 0 | 1) {
+  const to = from === 0 ? 1 : 0;
+  for (let i = 1; i < CUT.length; i++) {
+    if (value <= CUT[i][from]) {
+      const a = CUT[i - 1];
+      const b = CUT[i];
+      return lerp(a[to], b[to], (value - a[from]) / (b[from] - a[from]));
+    }
+  }
+  return CUT[CUT.length - 1][to];
+}
 
 // How large the ball has to grow to flood the whole window with red from anywhere on screen.
 const FLOOD = 72;
+
+const INK = "#1b1815";
+const CREAM = "#f4ecdf";
+const RED = "#c8301e";
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -45,6 +77,16 @@ function autoRail(cx: number) {
     }
   }
   return AUTO_RAIL[AUTO_RAIL.length - 1][1];
+}
+
+// On a screen narrower than the plate, pan so the ball stays between a quarter and three
+// quarters of the way across, leaning toward where it is headed. Returns --cam for the stage.
+function camFor(stage: HTMLElement | null, at: number) {
+  if (!stage) return 0.5;
+  const shown = window.innerWidth / stage.offsetWidth;
+  if (shown >= 0.999) return 0.5;
+  const onScreen = 0.5 + (at - 0.5) * 0.5;
+  return clamp01((at - shown * onScreen) / (1 - shown));
 }
 
 function setVars(el: HTMLElement | null, vars: Record<string, string | number>) {
@@ -66,18 +108,21 @@ function Words({ text, className }: { text: string; className?: string }) {
   );
 }
 
-function Plate({ name, w, eager }: { name: string; w: number; eager?: boolean }) {
+function Plate({ name, w, eager, className = "plate" }: { name: string; w: number; eager?: boolean; className?: string }) {
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- plates need exact registration, not layout-driven sizing
-    <img
-      className="plate"
-      src={`/art/${name}-1x.webp`}
-      srcSet={`/art/${name}-1x.webp ${w}w, /art/${name}-2x.webp ${w * 2}w`}
-      sizes="max(100vw, 178svh)"
-      alt=""
-      decoding="async"
-      fetchPriority={eager ? "high" : "auto"}
-    />
+    // Phones get the 1x file: the 2x plates are over 3,000 pixels wide and only cost them memory.
+    <picture>
+      <source media="(max-width: 899px)" srcSet={`/art/${name}-1x.webp`} />
+      <img
+        className={className}
+        src={`/art/${name}-1x.webp`}
+        srcSet={`/art/${name}-1x.webp ${w}w, /art/${name}-2x.webp ${w * 2}w`}
+        sizes="max(100vw, 178lvh)"
+        alt=""
+        decoding="async"
+        fetchPriority={eager ? "high" : "auto"}
+      />
+    </picture>
   );
 }
 
@@ -108,6 +153,8 @@ export function Film() {
   const autoLayer = useRef<HTMLDivElement>(null);
   const autoStage = useRef<HTMLDivElement>(null);
   const autoBall = useRef<HTMLDivElement>(null);
+  const gate = useRef<HTMLDivElement>(null);
+  const buildWash = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
@@ -119,6 +166,10 @@ export function Film() {
       const letters = q<HTMLElement>(".hero-name .ch");
       let centres: number[] | null = null;
       ScrollTrigger.addEventListener("refreshInit", () => (centres = null));
+
+      let lastHeroX = HERO.from;
+      let lastAutoX = AUTO.from;
+      let hoopsPassed = 0;
 
       const renderHero = (roll: number, leap: number) => {
         const k = 0.28 * roll + 0.72 * roll * roll;
@@ -134,7 +185,7 @@ export function Film() {
           "--flat": clamp01((s - 8) / 10),
           "--clip": leap > 0 ? "none" : HERO_CLIP,
         });
-        setVars(heroStage.current, { "--cam": cx / HERO.w, "--zoom": 1 + 0.05 * roll });
+        setVars(heroStage.current, { "--cam": camFor(heroStage.current, cx / HERO.w), "--zoom": 1 + 0.05 * roll });
 
         // A real cast shadow: it tightens, darkens and closes in as the ball loses height.
         const height = HERO_FLOOR - (cy + HERO.ball / 2);
@@ -146,7 +197,11 @@ export function Film() {
           "--b": `${2 + height / 36}px`,
         });
 
-        // The name feels the ball go by: letters above it narrow and lift, then settle.
+        sound.roll(leap > 0 ? 0 : clamp01(Math.abs(cx - lastHeroX) / 14));
+        sound.swell(leap);
+        lastHeroX = cx;
+
+        // The name feels the ball go by: the letters above it ride up over it like a bump, then settle.
         const ballBox = heroBall.current?.getBoundingClientRect();
         if (!ballBox || !letters.length) return;
         if (!centres) centres = letters.map((el) => el.getBoundingClientRect().left + el.offsetWidth / 2);
@@ -155,11 +210,12 @@ export function Film() {
         const strength = clamp01(roll * 14) * (1 - clamp01(leap * 4));
         letters.forEach((el, i) => {
           const wave = strength * Math.exp(-(((centres![i] - ballX) / reach) ** 2));
-          el.style.fontVariationSettings = `"wdth" ${(118 - 34 * wave).toFixed(1)}`;
-          el.style.transform = `translateY(${(-0.09 * wave).toFixed(3)}em)`;
+          el.style.fontVariationSettings = `"wdth" ${(125 - 16 * wave).toFixed(1)}`;
+          el.style.transform = `translateY(${(-0.17 * wave).toFixed(3)}em)`;
         });
       };
 
+      let landed = false;
       const renderBuild = (fall: number, hop: number, out: number) => {
         const s = FLOOD ** (1 - fall);
         const lift = clamp01((s - 1) / 5) + Math.sin(hop * Math.PI) * 0.16;
@@ -171,17 +227,21 @@ export function Film() {
           "--flat": clamp01((s - 8) / 10),
         });
         setVars(buildShadow.current, { ...pos, "--lift": lift });
-        setVars(buildStage.current, { "--cam": 0.93, "--zoom": 1.06 - 0.06 * fall });
+        if (fall >= 1 && !landed) sound.thud(0.7);
+        landed = fall >= 1;
+        setVars(buildStage.current, { "--cam": camFor(buildStage.current, BUILD.land[0] / BUILD.w), "--zoom": 1.06 - 0.06 * fall });
+        // The tall-screen wash under the copy must not cut across the red while it still fills the frame.
+        if (buildWash.current) buildWash.current.style.opacity = String(clamp01((fall - 0.45) / 0.3));
       };
 
-      const labels = q<HTMLElement>(".hoop-label");
+      const verbs = q<HTMLElement>(".auto-copy .verb");
       const renderAuto = (run: number) => {
         const k = 0.35 * run + 0.65 * run * run;
         const cx = lerp(AUTO.from, AUTO.to, k);
         const d = lerp(126, 138, clamp01(cx / AUTO.w));
         const cy = autoRail(cx) - d / 2 + 10;
         setVars(autoBall.current, { "--x": cx / AUTO.w, "--y": cy / AUTO.h, "--d": d / AUTO.w });
-        setVars(autoStage.current, { "--cam": clamp01(cx / AUTO.w), "--zoom": 1.04 - 0.04 * run });
+        setVars(autoStage.current, { "--cam": camFor(autoStage.current, clamp01(cx / AUTO.w)), "--zoom": 1.04 - 0.04 * run });
         const height = autoFloor(cx) - (cy + d / 2);
         setVars(autoShadow.current, {
           "--x": (cx + SUN * height) / AUTO.w,
@@ -190,17 +250,38 @@ export function Film() {
           "--o": Math.max(0, 0.42 - height / 1000),
           "--b": `${3 + height / 30}px`,
         });
-        labels.forEach((label, i) => {
-          const passed = clamp01((cx - (AUTO_HOOPS[i].x - 40)) / 90);
-          label.style.opacity = String(passed);
-          label.style.transform = `translate(-50%, ${(1 - passed) * 10}px)`;
+        sound.roll(clamp01(Math.abs(cx - lastAutoX) / 16));
+        lastAutoX = cx;
+        // Each hoop the ball threads lights its verb in the sentence: answers, reminds, books.
+        let passed = 0;
+        verbs.forEach((verb, i) => {
+          const on = clamp01((cx - (AUTO_HOOPS[i].x - 30)) / 70);
+          verb.style.setProperty("--on", on.toFixed(3));
+          if (on >= 1) passed = i + 1;
         });
+        if (passed > hoopsPassed) sound.tick((passed - 1) as 0 | 1 | 2);
+        hoopsPassed = passed;
       };
+
+      // The name must clear the ball at any window shape. On a wide, short window the plate is
+      // cropped from the top and the ball rides higher, so the name is capped by the space above it.
+      const fitName = () => {
+        const name = q<HTMLElement>(".hero-name")[0];
+        const stage = heroStage.current?.getBoundingClientRect();
+        const copy = heroCopy.current;
+        if (!name || !stage || !copy) return;
+        const ballTop = stage.top + ((heroRail(HERO.from) - HERO.ball / 2) / HERO.h) * stage.height;
+        const room = ballTop - copy.getBoundingClientRect().top - parseFloat(getComputedStyle(copy).paddingTop) - 16;
+        name.style.setProperty("--fit", `${Math.max(34, room / (2 * 0.88))}px`);
+      };
+      fitName();
+      ScrollTrigger.addEventListener("refresh", fitName);
+      window.addEventListener("resize", fitName);
 
       renderHero(0, 0);
       renderBuild(0, 0, 0);
       renderAuto(0);
-      gsap.set([redLayer.current, buildLayer.current, autoLayer.current], { autoAlpha: 0 });
+      if (!reduced) gsap.set([redLayer.current, buildLayer.current, autoLayer.current], { autoAlpha: 0 });
 
       // --- Arrival: the name sets itself, then the ball drops onto the rail. ---
 
@@ -208,7 +289,7 @@ export function Film() {
       const impact = `${((HERO.from / HERO.w) * 100).toFixed(2)}% ${((heroRail(HERO.from) / HERO.h) * 100).toFixed(2)}%`;
       const DROP = { at: 0.3, lasts: 1.3 };
       const hit = DROP.at + DROP.lasts * 0.364; // first contact of a bounce.out
-      const intro = gsap.timeline({ defaults: { ease: "expo.out" } });
+      const intro = gsap.timeline({ paused: true, defaults: { ease: "expo.out" } });
       intro
         .fromTo(heroBall.current, { "--up": 11 }, { "--up": 0, duration: DROP.lasts, ease: "bounce.out" }, DROP.at)
         .fromTo(
@@ -218,12 +299,28 @@ export function Film() {
           hit,
         )
         .from(heroWords, { yPercent: 130, duration: 1.3, stagger: 0.09 }, hit + 0.12)
-        .fromTo(".hero-name", { "--wdth": 70 }, { "--wdth": 118, duration: 1.7 }, hit + 0.12)
+        .fromTo(".hero-name", { "--wdth": 78 }, { "--wdth": 125, duration: 1.7 }, hit + 0.12)
         .from(q(".hero-fade"), { opacity: 0, y: 14, duration: 1, stagger: 0.08, ease: "power3.out" }, hit + 0.7);
       setVars(heroBall.current, { "--clip": "none" });
       intro.add(() => setVars(heroBall.current, { "--clip": HERO_CLIP }), DROP.at + DROP.lasts);
 
-      if (reduced) return;
+      // Nothing plays over a half-loaded frame: wait for the plate, the ball and the font,
+      // but never keep a visitor on a slow line staring at blank paper for long.
+      const needed = q<HTMLImageElement>(".hero-reveal img.plate, .ball img").slice(0, 2);
+      const loaded = Promise.all([document.fonts.ready, ...needed.map((img) => img.decode().catch(() => undefined))]);
+      const patience = new Promise((resolve) => setTimeout(resolve, 3500));
+      Promise.race([loaded, patience]).then(() => (reduced ? intro.progress(1) : intro.play()));
+
+      // Every start state is now set, so the stage can show itself (it is hidden in CSS until here).
+      gate.current?.style.setProperty("opacity", "1");
+
+      if (reduced) {
+        // No film: each scene stands as a finished still, stacked down the page (see globals.css).
+        renderBuild(1, 0, 0);
+        renderAuto(0.52);
+        verbs.forEach((verb) => verb.style.setProperty("--on", "1"));
+        return;
+      }
 
       // --- The film: one scrubbed timeline, pinned for its whole length. ---
 
@@ -233,27 +330,44 @@ export function Film() {
       const drawHero = () => renderHero(hero.roll, hero.leap);
       const drawBuild = () => renderBuild(build.fall, build.hop, build.out);
 
-      const autoCopyAt = window.innerWidth < 768 ? 88.5 : 77;
+      const autoCopyAt = window.innerWidth < 900 ? 88.5 : 77;
 
-      const tl = gsap.timeline({
-        defaults: { ease: "none" },
-        scrollTrigger: {
-          trigger: root.current,
-          start: "top top",
-          end: "+=1050%",
-          pin: true,
-          scrub: true,
-          anticipatePin: 1,
-          invalidateOnRefresh: true,
-        },
+      const tl = gsap.timeline({ paused: true, defaults: { ease: "none" } });
+      // The section is tall and its stage is position: sticky, so the browser holds the frame
+      // still natively; the scroll position is only read, then mapped to a time on the film.
+      const scrub = ScrollTrigger.create({
+        trigger: root.current,
+        start: "top top",
+        end: "bottom bottom",
+        onUpdate: (self) => tl.time(along(self.progress * SCREENS, 0)),
+        onRefresh: (self) => tl.time(along(self.progress * SCREENS, 0)),
       });
+      let keep: number | null = null;
+      let lastWidth = window.innerWidth;
+      const rememberPlace = () => {
+        if (window.innerWidth === lastWidth) return;
+        lastWidth = window.innerWidth;
+        if (keep === null && scrub.isActive) keep = scrub.progress;
+      };
+      const restorePlace = () => {
+        if (keep === null) return;
+        window.scrollTo(0, scrub.start + keep * (scrub.end - scrub.start));
+        keep = null;
+      };
+      window.addEventListener("resize", rememberPlace);
+      ScrollTrigger.addEventListener("refresh", restorePlace);
+
+      // For the screenshot scripts: where to scroll to see a given film time.
+      const debug = window as unknown as { __filmScroll?: (t: number) => number; __filmNow?: () => number };
+      debug.__filmScroll = (t) => scrub.start + (along(t, 1) / SCREENS) * (scrub.end - scrub.start);
+      debug.__filmNow = () => tl.time();
 
       // Hero: roll the length of the rail, then leap at the lens until the frame is red.
       tl.to(hero, { roll: 1, duration: 24, onUpdate: drawHero }, 0)
         .to(cue.current, { autoAlpha: 0, duration: 2 }, 0.5)
         .to([heroCopy.current, q(".hero-role")], { yPercent: -16, autoAlpha: 0, duration: 4.5, ease: "power1.in" }, 20)
         .to(hero, { leap: 1, duration: 7, onUpdate: drawHero }, 24)
-        .fromTo(document.documentElement, { "--nav": "#1b1815" }, { "--nav": "#f4ecdf", duration: 1.5 }, 28.5)
+        .set(document.documentElement, { "--nav-l": CREAM, "--nav-r": CREAM, "--nav-dot": CREAM }, 29.9)
         .set(redLayer.current, { autoAlpha: 1 }, 31)
         .set(heroLayer.current, { autoAlpha: 0 }, 31);
 
@@ -287,7 +401,7 @@ export function Film() {
 
       tl.from(first, { yPercent: 130, duration: 2.2, stagger: 0.16, ease: "power3.out" }, 31.4);
       if (lost) {
-        tl.set(lost.parentElement, { overflow: "visible" }, 35.4).to(
+        tl.call(() => sound.drop(), undefined, 35.5).set(lost.parentElement, { overflow: "visible" }, 35.4).to(
           lost,
           { y: () => window.innerHeight * 1.1, x: () => window.innerWidth * 0.04, rotation: 16, duration: 3.4, ease: "power2.in" },
           35.4,
@@ -307,23 +421,39 @@ export function Film() {
       tl.set(buildLayer.current, { autoAlpha: 1 }, 50)
         .set(redLayer.current, { autoAlpha: 0 }, 50)
         .to(build, { fall: 1, duration: 8, ease: "power1.out", onUpdate: drawBuild }, 50)
-        .fromTo(document.documentElement, { "--nav": "#f4ecdf" }, { "--nav": "#1b1815", duration: 2, immediateRender: false }, 52)
+        .set(document.documentElement, { "--nav-l": INK, "--nav-dot": RED }, 51.1)
+        .set(document.documentElement, { "--nav-r": INK }, 53.4)
         .to(build, { hop: 1, duration: 2.2, onUpdate: drawBuild }, 58)
         .from(q(".build-copy .word"), { yPercent: 130, duration: 2.4, stagger: 0.2, ease: "power3.out" }, 57)
+        .fromTo(q(".build-copy h2"), { "--wdth": 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, 57)
         .from(q(".build-copy .fade"), { autoAlpha: 0, y: 16, duration: 2, stagger: 0.3, ease: "power2.out" }, 59)
-        .to(build, { out: 1, duration: 6, onUpdate: drawBuild }, 67)
-        .to(q(".build-copy"), { autoAlpha: 0, yPercent: -6, duration: 3, ease: "power1.in" }, 70);
+        // Build builds: the thirteen parts are set down one after another around the ball.
+        .from(
+          q(".build-part"),
+          { autoAlpha: 0, scale: 1.08, y: -12, duration: 1.2, ease: "power3.out", stagger: { each: 0.52, onStart: () => sound.thud(0.22) } },
+          58.6,
+        )
+        .to(build, { out: 1, duration: 5, onUpdate: drawBuild }, 66.4)
+        .to(q(".build-copy"), { autoAlpha: 0, yPercent: -6, duration: 3, ease: "power1.in" }, 68.6);
 
-      // Automate: dissolve to the assembled run; the ball threads the three hoops.
-      tl.to(buildLayer.current, { autoAlpha: 0, duration: 4.5, ease: "power1.inOut" }, 72.5)
-        .fromTo(autoLayer.current, { autoAlpha: 0 }, { autoAlpha: 1, duration: 4.5, ease: "power1.inOut" }, 72.5)
-        .to(auto, { run: 1, duration: 27, onUpdate: () => renderAuto(auto.run) }, 76)
+      // Automate: the camera whips right after the ball, and it rolls back into frame on the assembled run.
+      tl.set(autoLayer.current, { autoAlpha: 1 }, 71.2)
+        .fromTo(buildLayer.current, { xPercent: 0 }, { xPercent: -100, duration: 4.4, ease: "power2.inOut" }, 71.2)
+        .fromTo(autoLayer.current, { xPercent: 100 }, { xPercent: 0, duration: 4.4, ease: "power2.inOut" }, 71.2)
+        .set(buildLayer.current, { autoAlpha: 0 }, 75.7)
+        .to(auto, { run: 1, duration: 27.6, onUpdate: () => renderAuto(auto.run) }, 75.2)
         .from(q(".auto-copy .word"), { yPercent: 130, duration: 2.4, stagger: 0.2, ease: "power3.out" }, autoCopyAt)
+        .fromTo(q(".auto-copy h2"), { "--wdth": 80 }, { "--wdth": 125, duration: 3.4, ease: "power3.out" }, autoCopyAt)
         .from(q(".auto-copy .fade"), { autoAlpha: 0, y: 16, duration: 2, stagger: 0.3, ease: "power2.out" }, autoCopyAt + 2)
-        .to(autoLayer.current, { autoAlpha: 0, duration: 4, ease: "power1.in" }, 102);
+        // Hold the last frame: the Grow scene dissolves in over it (see Grow.tsx), so there is no blank beat.
+        .to({}, { duration: 0.5 }, 102);
 
       return () => {
-        document.documentElement.style.removeProperty("--nav");
+        for (const name of ["--nav-l", "--nav-r", "--nav-dot"]) document.documentElement.style.removeProperty(name);
+        window.removeEventListener("resize", fitName);
+        window.removeEventListener("resize", rememberPlace);
+        ScrollTrigger.removeEventListener("refresh", restorePlace);
+        scrub.kill();
       };
     },
     { scope: root },
@@ -332,9 +462,10 @@ export function Film() {
   const [build, automate] = site.acts;
 
   return (
-    <section ref={root} id="top" className="relative h-svh w-full overflow-hidden bg-paper" aria-label="Introduction">
+    <section ref={root} id="top" className="relative bg-paper" style={{ height: `${(SCREENS + 1) * 100}lvh` }} aria-label="Introduction">
+      <div ref={gate} className="film-gate sticky top-0 h-lvh w-full overflow-hidden bg-paper">
       {/* Hero */}
-      <div ref={heroLayer} className="layer grain">
+      <div ref={heroLayer} className="layer">
         <div ref={heroStage} className="stage" style={{ "--ar": HERO.w / HERO.h, "--ay": 0.72 } as React.CSSProperties}>
           <div className="hero-reveal absolute inset-0">
             <Plate name="hero-plate" w={HERO.w} eager />
@@ -351,10 +482,10 @@ export function Film() {
           </div>
         </div>
 
-        <div ref={heroCopy} className="absolute inset-x-0 top-0 px-[5vw] pt-[max(15svh,6.5rem)]">
-          <h1 className="hero-name display text-[clamp(3.4rem,11.6vw,15rem)] text-ink">
+        <div ref={heroCopy} className="absolute inset-x-0 top-0 px-[5vw] pt-[max(13lvh,5.75rem)]">
+          <h1 className="hero-name display text-[min(clamp(3.1rem,10.3vw,13.5rem),var(--fit,100rem))] text-ink max-md:text-[min(13.8vw,var(--fit,100rem))]">
             {[site.name.first, site.name.last].map((line) => (
-              <span key={line} className="line-mask" aria-label={line}>
+              <span key={line} className="line-mask whitespace-nowrap" aria-label={line}>
                 <span className="word" aria-hidden>
                   {[...line].map((ch, i) => (
                     <span key={i} className="ch inline-block">
@@ -366,28 +497,38 @@ export function Film() {
             ))}
           </h1>
         </div>
-        <div className="hero-role absolute right-[5vw] top-[max(16.5svh,7rem)] max-md:left-[5vw] max-md:right-auto max-md:top-[calc(max(15svh,6.5rem)+7.4rem)]">
-          <p className="hero-fade reading max-w-[21ch] text-[clamp(1rem,1.45vw,1.5rem)] text-ink/80">{site.role}</p>
+        <div className="hero-role absolute right-[5vw] top-[calc(max(13lvh,5.75rem)+0.5rem)] max-md:left-[5vw] max-md:right-auto max-md:top-[calc(max(13lvh,5.75rem)+26vw)]">
+          <p className="hero-fade reading read-size max-w-[24ch] text-ink/85 md:text-right">{site.role}</p>
         </div>
 
         <div ref={cue} className="absolute bottom-[4svh] left-[5vw]">
           <p className="hero-fade small flex items-center gap-3 text-ink/70">
             <span className="block h-px w-10 bg-ink/50" />
-            Scroll to follow the lead
+            Scroll, or
+            <button
+              type="button"
+              className="pointer-events-auto border-b border-ink/50 pb-px text-ink transition-colors duration-300 hover:border-red hover:text-red"
+              onClick={() => document.dispatchEvent(new CustomEvent("film:play"))}
+            >
+              play the film
+            </button>
           </p>
         </div>
       </div>
 
       {/* Red */}
-      <div ref={redLayer} className="layer grain flex items-center bg-red px-[5vw] text-cream">
+      <div ref={redLayer} className="layer red-grain flex items-center bg-red px-[5vw] text-cream">
         <div className="relative w-full">
-          <p className="say-1 display max-w-[15ch] text-[clamp(2.5rem,7.4vw,9rem)]" style={{ "--wdth": 104 } as React.CSSProperties}>
+          <p className="say-1 display max-w-[15ch] text-[clamp(2.5rem,7.4vw,9rem)]" style={{ "--wdth": 114 } as React.CSSProperties}>
             <Words text={site.statement[0]} />
           </p>
-          <div className="caught absolute rounded-full bg-cream" />
+          <div className="caught absolute overflow-hidden rounded-full shadow-[0.05em_0.08em_0.2em_rgba(70,8,2,0.6)]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/art/ball.webp" alt="" className="size-full" />
+          </div>
           <p
             className="say-2 display absolute inset-x-0 top-1/2 max-w-[12ch] -translate-y-1/2 text-[clamp(3rem,10vw,12.5rem)]"
-            style={{ "--wdth": 112 } as React.CSSProperties}
+            style={{ "--wdth": 125 } as React.CSSProperties}
           >
             <Words text={site.statement[1]} />
           </p>
@@ -395,9 +536,24 @@ export function Film() {
       </div>
 
       {/* Build */}
-      <div ref={buildLayer} className="layer grain">
+      <div ref={buildLayer} className="layer">
         <div ref={buildStage} className="stage" style={{ "--ar": BUILD.w / BUILD.h } as React.CSSProperties}>
-          <Plate name="build" w={BUILD.w} />
+          {/* The surface starts empty; each part is laid on it in turn. */}
+          <Plate name="build-empty" w={BUILD.w} />
+          {PARTS.map(([x, y, w, h], i) => (
+            <div
+              key={i}
+              className="build-part"
+              style={{
+                left: `${(x / BUILD.w) * 100}%`,
+                top: `${(y / BUILD.h) * 100}%`,
+                width: `${(w / BUILD.w) * 100}%`,
+                height: `${(h / BUILD.h) * 100}%`,
+                backgroundSize: `${(BUILD.w / w) * 100}% ${(BUILD.h / h) * 100}%`,
+                backgroundPosition: `${(x / (BUILD.w - w)) * 100}% ${(y / (BUILD.h - h)) * 100}%`,
+              }}
+            />
+          ))}
           <div ref={buildShadow} className="ball-shadow" style={{ "--d": BUILD.ball / BUILD.w } as React.CSSProperties} />
           <div ref={buildBall} className="ball" style={{ "--d": BUILD.ball / BUILD.w } as React.CSSProperties}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -405,51 +561,45 @@ export function Film() {
             <i />
           </div>
         </div>
-        <div className="absolute inset-x-0 bottom-0 h-[58svh] bg-gradient-to-t from-paper from-35% via-paper/80 to-transparent md:hidden" />
-        <ActCopy act={build} className="build-copy left-[5vw] top-1/2 w-[min(31vw,30rem)] -translate-y-1/2 max-md:bottom-[8svh] max-md:top-auto max-md:w-[84vw] max-md:translate-y-0" />
+        <div ref={buildWash} className="absolute inset-x-0 bottom-0 h-[62lvh] bg-[linear-gradient(to_top,var(--color-paper)_78%,transparent)] md:hidden" />
+        <ActCopy act={build} className="build-copy left-[5vw] top-1/2 w-[min(31vw,30rem)] -translate-y-1/2 max-md:bottom-[9lvh] max-md:top-auto max-md:w-[84vw] max-md:translate-y-0" />
       </div>
 
       {/* Automate */}
-      <div ref={autoLayer} className="layer grain">
+      <div ref={autoLayer} className="layer">
         <div ref={autoStage} className="stage" style={{ "--ar": AUTO.w / AUTO.h, "--ay": 0.42 } as React.CSSProperties}>
           <Plate name="automate" w={AUTO.w} />
           <div ref={autoShadow} className="floor-shadow" style={{ "--d": 0.125 } as React.CSSProperties} />
-          <Ball ref={autoBall} clip={AUTO_CLIP} />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            className="plate"
-            src="/art/automate-fg-1x.webp"
-            srcSet={`/art/automate-fg-1x.webp ${AUTO.w}w, /art/automate-fg-2x.webp ${AUTO.w * 2}w`}
-            sizes="max(100vw, 178svh)"
-            alt=""
-          />
-          {AUTO_HOOPS.map((hoop, i) => (
-            <span
-              key={site.followUp[i]}
-              className="hoop-label small absolute text-ink"
-              style={{ left: `${(hoop.x / AUTO.w) * 100}%`, top: `${((hoop.top - 44) / AUTO.h) * 100}%`, opacity: 0 }}
-            >
-              {site.followUp[i]}
-            </span>
-          ))}
+          <Ball ref={autoBall} />
+          <Plate name="automate-fg" w={AUTO.w} />
         </div>
-        <ActCopy act={automate} className="auto-copy right-[5vw] top-[max(10.5svh,5.5rem)] w-[51vw] max-md:left-[5vw] max-md:right-auto max-md:w-[84vw]" indent />
+        <ActCopy act={automate} className="auto-copy left-[57vw] top-[max(11lvh,5.5rem)] w-[38vw] max-md:left-[5vw] max-md:w-[84vw]" verbs={site.followUp} />
+      </div>
       </div>
     </section>
   );
 }
 
-function ActCopy({ act, className, indent }: { act: (typeof site.acts)[number]; className: string; indent?: boolean }) {
-  const side = indent ? "md:ml-auto md:w-[35vw]" : "";
+function ActCopy({ act, className, verbs }: { act: (typeof site.acts)[number]; className: string; verbs?: readonly string[] }) {
+  // Words listed in `verbs` are wrapped so the scene can light them one by one.
+  const line = verbs
+    ? act.line.split(new RegExp(`\\b(${verbs.join("|")})\\b`)).map((part, i) =>
+        verbs.includes(part) ? (
+          <span key={i} className="verb">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )
+    : act.line;
   return (
     <div className={`absolute ${className}`}>
-      <h2 className="display text-[clamp(3.2rem,8.8vw,11rem)] text-ink">
+      <h2 className="display text-[clamp(3rem,7.6vw,9.6rem)] text-ink">
         <Words text={act.word} />
       </h2>
-      <p className={`fade reading mt-[1.6vw] max-w-[26ch] text-[clamp(1.05rem,1.5vw,1.55rem)] text-ink/85 ${side}`}>
-        {act.line}
-      </p>
-      <ul className={`fade small mt-[1.4vw] flex flex-wrap gap-x-5 gap-y-1 text-ink/65 ${side}`}>
+      <p className="fade reading read-size mt-[1.5vw] max-w-[27ch] text-ink/90">{line}</p>
+      <ul className="fade small mt-[1.2vw] flex flex-wrap gap-x-5 gap-y-1 text-ink/65">
         {act.items.map((item) => (
           <li key={item}>{item}</li>
         ))}

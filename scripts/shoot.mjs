@@ -6,11 +6,10 @@ import sharp from "sharp";
 const [out, size = "1440x810", stops = "0", cols = "3"] = process.argv.slice(2);
 const [width, height] = size.split("x").map(Number);
 const URL = process.env.SITE_URL ?? "http://localhost:3210/";
-const FILM_UNITS = 106;
-const FILM_SCREENS = 10.5;
 
 const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--hide-scrollbars"] });
-const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+// REDUCED=1 emulates a visitor who has asked for reduced motion.
+const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: process.env.REDUCED ? "reduce" : "no-preference" });
 const problems = [];
 page.on("console", (m) => ["error", "warning"].includes(m.type()) && problems.push(`${m.type()}: ${m.text().slice(0, 200)}`));
 page.on("pageerror", (e) => problems.push(`pageerror: ${e.message.slice(0, 200)}`));
@@ -28,7 +27,8 @@ for (const raw of stops.split(",")) {
   } else if (stop.startsWith("y:")) {
     y = Number(stop.slice(2));
   } else {
-    y = Math.round((Number(stop) / FILM_UNITS) * FILM_SCREENS * height);
+    // The page knows where each film time sits on the scroll.
+    y = await page.evaluate((t) => Math.round(window.__filmScroll(t)), Number(stop));
   }
   await page.evaluate((top) => window.scrollTo(0, top), y);
   await page.waitForTimeout(wait ? Number(wait) : stop === "0" ? 100 : 900);

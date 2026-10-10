@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# super-resolution output, about 115 MB; regenerate with scripts/upscale-art.mjs
+/art/up/

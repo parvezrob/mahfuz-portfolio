@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type * as Three from "three";
 import { site } from "@/content/site";
+import { sound } from "@/lib/sound";
 
 const act = site.acts[2];
 const CELL = 7; // collision grid for the letterforms, in CSS pixels
@@ -16,6 +17,7 @@ const FOV = 26;
 export function Grow() {
   const section = useRef<HTMLElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const host = section.current;
@@ -29,8 +31,8 @@ export function Grow() {
       const [{ default: Matter }, THREE] = await Promise.all([import("matter-js"), import("three"), document.fonts.ready]);
       if (disposed) return;
 
-      const { Engine, Bodies, Body, Composite, Mouse, MouseConstraint } = Matter;
-      const family = getComputedStyle(document.documentElement).getPropertyValue("--font-archivo") || "sans-serif";
+      const { Engine, Bodies, Body, Composite, Events, Mouse, MouseConstraint } = Matter;
+      const family = getComputedStyle(document.documentElement).getPropertyValue("--font-display") || "sans-serif";
 
       let renderer: Three.WebGLRenderer;
       try {
@@ -82,13 +84,16 @@ export function Grow() {
       let quota = 0;
       let distance = 1000;
       let frame = 0;
+      let drained = false;
+      let shown = -1;
+      let awake = 60;
       const pointer = { x: 0, y: 0 };
 
       const build = () => {
         w = view.clientWidth;
         h = view.clientHeight;
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const small = w < 768;
+        const small = w < 900;
         radius = Math.max(13, Math.min(w * 0.0165, 28));
         quota = reduced ? 0 : Math.round(Math.max(34, Math.min((w * h) / 16500, 96)));
 
@@ -114,18 +119,29 @@ export function Grow() {
         const wc = word.getContext("2d", { willReadFrequently: true })!;
         wc.scale(dpr, dpr);
         const setFont = (px: number) => {
-          wc.font = `780 ${px}px ${family}`;
+          wc.font = `680 ${px}px ${family}`;
           if ("fontStretch" in wc) (wc as CanvasRenderingContext2D & { fontStretch: string }).fontStretch = "expanded";
-          if ("letterSpacing" in wc) (wc as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${-px * 0.035}px`;
+          if ("letterSpacing" in wc) (wc as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${-px * 0.042}px`;
         };
-        setFont(200);
-        const px = 200 * Math.min((w * 0.92) / wc.measureText(act.word).width, (h * 0.5) / 150);
-        setFont(px);
-        const metrics = wc.measureText(act.word);
-        const left = (w - metrics.width) / 2 + px * 0.0175;
-        const baseline = h - Math.max(metrics.actualBoundingBoxDescent, 0) - Math.max(10, h * 0.018);
+        // One line on a wide screen; on a phone the word stacks in two so the letters stay big.
+        // Fit and centre on the ink itself, not the advance width, so nothing is clipped.
+        const half = Math.ceil(act.word.length / 2);
+        const lines = small ? [act.word.slice(0, half), act.word.slice(half)] : [act.word];
+        const inkWidth = (m: TextMetrics) => m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+        const widest = (size: number) => {
+          setFont(size);
+          return Math.max(...lines.map((line) => inkWidth(wc.measureText(line))));
+        };
+        const px = 200 * Math.min((w * 0.9) / widest(200), (h * (small ? 0.56 : 0.5)) / (150 * lines.length));
+        const span = widest(px);
+        const bottom = h - Math.max(10, h * 0.018);
         wc.fillStyle = INK;
-        wc.fillText(act.word, left, baseline);
+        lines.forEach((line, i) => {
+          const metrics = wc.measureText(line);
+          const left = (w - span) / 2 + metrics.actualBoundingBoxLeft;
+          const baseline = bottom - Math.max(metrics.actualBoundingBoxDescent, 0) - (lines.length - 1 - i) * px * 0.8;
+          wc.fillText(line, left, baseline);
+        });
 
         const pixels = wc.getImageData(0, 0, word.width, word.height).data;
         const solid = (x: number, y: number) => pixels[(Math.round(y * dpr) * word.width + Math.round(x * dpr)) * 4 + 3] > 120;
@@ -147,12 +163,25 @@ export function Grow() {
         }
         const fixed = { isStatic: true };
         statics.push(
-          Bodies.rectangle(w / 2, h + 40, w * 2, 80, fixed),
+          Bodies.rectangle(w / 2, h + 40, w * 3, 80, fixed),
           Bodies.rectangle(-40, h / 2, 80, h * 4, fixed),
-          Bodies.rectangle(w + 40, h / 2, 80, h * 4, fixed),
+          // The right wall stands back from the edge: balls enter through that gap, and a ramp
+          // behind the edge rolls any stray one back into view.
+          Bodies.rectangle(w + radius * 9 + 40, h / 2, 80, h * 4, fixed),
+          Bodies.rectangle(w + radius * 4.5, h - radius * 2.2, radius * 10, 24, { isStatic: true, angle: -0.42 }),
         );
         Composite.add(engine.world, statics);
         Composite.add(engine.world, MouseConstraint.create(engine, { mouse, constraint: { stiffness: 0.16, damping: 0.1 } }));
+        drained = false;
+
+        // Lacquer on lacquer, lacquer on the letters: every real knock makes a sound.
+        Events.on(engine, "collisionStart", (event) => {
+          for (const { bodyA, bodyB } of event.pairs) {
+            if (bodyA.isStatic && bodyB.isStatic) continue;
+            const speed = Math.hypot(bodyA.velocity.x - bodyB.velocity.x, bodyA.velocity.y - bodyB.velocity.y);
+            if (speed > 1.2) sound.clink(Math.min(1, speed / 16));
+          }
+        });
 
         // The letters stand a ball's depth off the wall, so they throw a soft shadow too.
         const texture = document.createElement("canvas");
@@ -192,15 +221,17 @@ export function Grow() {
         }
       };
 
+      // Leads arrive from the right, the way the last scene's rail left the frame, and arc in
+      // below the copy instead of raining through it.
       const spawn = () => {
-        const x = w * (0.08 + 0.84 * Math.random());
-        const ball = Bodies.circle(x, -radius * (2 + Math.random() * 6), radius, {
+        const ball = Bodies.circle(w + radius * (2 + Math.random() * 5), h * (0.3 + Math.random() * 0.16), radius, {
           restitution: 0.42,
           friction: 0.02,
           frictionAir: 0.004,
           density: 0.0018,
         });
-        Body.setVelocity(ball, { x: (Math.random() - 0.5) * 3, y: 2 + Math.random() * 3 });
+        const reach = 0.5 + w / 1500;
+        Body.setVelocity(ball, { x: -(5 + Math.random() * 10) * reach, y: -1 - Math.random() * 4 });
         balls.push(ball);
         Composite.add(engine.world, ball);
       };
@@ -227,11 +258,44 @@ export function Grow() {
       const tick = () => {
         frame = requestAnimationFrame(tick);
         const rect = host.getBoundingClientRect();
-        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
-        const progress = Math.min(1, Math.max(0, (window.innerHeight * 0.55 - rect.top) / (rect.height - window.innerHeight * 0.6)));
-        const want = Math.round(quota * Math.min(1, progress * 1.25));
+        const vh = window.innerHeight;
+        // This section starts on top of the film's held last frame and dissolves in over it
+        // across the first 0.6 of a screen, so the cut between the two has no blank beat.
+        const fade = reduced ? 1 : Math.min(1, Math.max(0, -rect.top / (vh * 0.6)));
+        if (fade !== shown) {
+          shown = fade;
+          stageRef.current?.style.setProperty("opacity", fade.toFixed(3));
+          stageRef.current?.style.setProperty("pointer-events", fade > 0.5 ? "auto" : "none");
+        }
+        if (rect.bottom < 0 || rect.top > 0 || fade === 0) return;
+        const progress = Math.min(1, Math.max(0, (-rect.top - vh * 0.45) / (rect.height - vh * 1.75)));
+        // At the very end the letters and the floor let go and the whole pile falls out of the
+        // bottom of the frame, on toward the next scene. Scrolling back up sets it up again.
+        if (progress > 0.965 && !drained) {
+          for (const body of Composite.allBodies(engine.world)) {
+            if (body.isStatic && body.position.x > 0 && body.position.x < w) Composite.remove(engine.world, body);
+          }
+          drained = true;
+          awake = 240;
+        } else if (progress < 0.9 && drained) {
+          build();
+          awake = 60;
+        }
+        const want = drained ? 0 : Math.round(quota * Math.min(1, progress * 1.3));
         if (balls.length < want && Math.random() < 0.5) spawn();
+        // A settled pile costs nothing: skip the physics and the redraw until something stirs.
+        const stirring = balls.length < want || mouse.button === 0 || balls.some((ball) => ball.speed > 0.07);
+        if (stirring) awake = 45;
+        if (--awake < 0) return;
         Engine.update(engine, 1000 / 60);
+        if (drained) {
+          // Once a ball has fallen out of the frame there is nothing left to simulate.
+          balls = balls.filter((ball) => {
+            if (ball.position.y < h + radius * 6) return true;
+            Composite.remove(engine.world, ball);
+            return false;
+          });
+        }
         draw();
       };
 
@@ -245,6 +309,7 @@ export function Grow() {
         mouse.position.y = (sy - h / 2) * k + h / 2;
         pointer.x = (sx / w) * 2 - 1;
         pointer.y = (sy / h) * 2 - 1;
+        awake = 45;
       };
       const fine = window.matchMedia("(pointer: fine)").matches;
       const onDown = (event: PointerEvent) => {
@@ -258,6 +323,31 @@ export function Grow() {
         view.addEventListener("pointermove", toPlane);
         view.addEventListener("pointerdown", onDown);
         window.addEventListener("pointerup", onUp);
+      }
+
+      // On a phone the pile answers to gravity: tilt it and the balls roll to the low side.
+      // Android reports orientation freely; iOS asks once, on the first touch.
+      const onTilt = (event: DeviceOrientationEvent) => {
+        if (event.gamma == null) return;
+        const lean = Math.max(-1, Math.min(1, event.gamma / 32));
+        engine.gravity.x = lean * 1.1;
+        engine.gravity.y = 1.15 * Math.max(0.35, 1 - Math.abs(lean) * 0.5);
+      };
+      const askTilt = () => {
+        const api = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
+        if (!api) return;
+        if (typeof api.requestPermission !== "function") return void window.addEventListener("deviceorientation", onTilt);
+        api
+          .requestPermission()
+          .then((answer) => answer === "granted" && window.addEventListener("deviceorientation", onTilt))
+          .catch(() => undefined);
+      };
+      if (!fine) {
+        if (typeof (window.DeviceOrientationEvent as unknown as { requestPermission?: unknown })?.requestPermission === "function") {
+          view.addEventListener("touchend", askTilt, { once: true });
+        } else {
+          askTilt();
+        }
       }
 
       build();
@@ -284,6 +374,8 @@ export function Grow() {
         view.removeEventListener("pointermove", toPlane);
         view.removeEventListener("pointerdown", onDown);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("deviceorientation", onTilt);
+        view.removeEventListener("touchend", askTilt);
         renderer.dispose();
         photo.dispose();
       };
@@ -296,14 +388,14 @@ export function Grow() {
   }, []);
 
   return (
-    <section ref={section} id="grow" className="relative h-[240svh]" aria-labelledby="grow-title">
-      <div className="grain sticky top-0 h-svh overflow-hidden">
+    <section ref={section} id="grow" className="relative z-10 -mt-[160lvh] h-[300lvh]" aria-labelledby="grow-title">
+      <div ref={stageRef} className="wall sticky top-0 h-lvh overflow-hidden opacity-0">
         <h2 id="grow-title" className="sr-only">
           {act.word}
         </h2>
         <canvas ref={canvas} className="absolute inset-0 size-full" aria-hidden />
-        <div className="pointer-events-none absolute left-[5vw] top-[max(13svh,6rem)] w-[min(84vw,30rem)]">
-          <p className="reading max-w-[24ch] text-[clamp(1.25rem,2.1vw,2.2rem)] text-ink">{act.line}</p>
+        <div className="pointer-events-none absolute left-[5vw] top-[max(13lvh,6rem)] w-[min(84vw,30rem)]">
+          <p className="reading read-size max-w-[26ch] text-ink">{act.line}</p>
           <ul className="small mt-4 flex flex-wrap gap-x-5 gap-y-1 text-ink/65">
             {act.items.map((item) => (
               <li key={item}>{item}</li>

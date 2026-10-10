@@ -1,12 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo } from "next/font/google";
+import { Mona_Sans, Newsreader } from "next/font/google";
 import { site } from "@/content/site";
 import "./globals.css";
 
-const archivo = Archivo({
-  variable: "--font-archivo",
+// Mona Sans carries the display type and the small labels; its width axis is what the
+// name ripples and the big words inflate on. Newsreader, with optical sizing, sets the
+// sentences people actually read.
+const display = Mona_Sans({
+  variable: "--font-display",
   subsets: ["latin"],
   axes: ["wdth"],
+  display: "swap",
+});
+const text = Newsreader({
+  variable: "--font-text",
+  subsets: ["latin"],
+  axes: ["opsz"],
   display: "swap",
 });
 
@@ -20,7 +29,9 @@ export const metadata: Metadata = {
     title: fullName,
     description: site.role,
     type: "website",
+    images: [{ url: "/og.jpg", width: 1200, height: 630, alt: `${fullName}: a red ball at the top of a brass rail` }],
   },
+  twitter: { card: "summary_large_image", images: ["/og.jpg"] },
 };
 
 export const viewport: Viewport = {
@@ -29,8 +40,14 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${archivo.variable} antialiased`}>
-      <body>{children}</body>
+    <html lang="en" className={`${display.variable} ${text.variable} antialiased`}>
+      <body>
+        {/* Without JavaScript nothing un-hides the film's first frame, so show it outright. */}
+        <noscript>
+          <style>{".film-gate{opacity:1}"}</style>
+        </noscript>
+        {children}
+      </body>
     </html>
   );
 }

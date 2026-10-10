@@ -31,18 +31,13 @@ export const site = {
     },
   ],
 
-  // The three checkpoints the ball passes in the Automate scene.
-  followUp: ["Reply", "Remind", "Book"],
+  // The three hoops in the Automate scene light these words of its sentence, in order.
+  followUp: ["answers", "reminds", "books"],
 
   about: {
     lines: [
-      "I'm Mahfuz.",
-      "I've been a creative director, an IT support engineer and an automation engineer. That is why I build the whole system and not one piece of it.",
-    ],
-    roles: [
-      { title: "Creative Director", at: "LofiStack" },
-      { title: "IT Support", at: "MassMarket" },
-      { title: "Automation Engineer", at: "Biofocal" },
+      "I’m Mahfuz.",
+      "I’ve been a creative director at LofiStack, an IT support engineer at MassMarket and an automation engineer at Biofocal. That is why I build the whole system, not one piece of it.",
     ],
   },
 
@@ -59,7 +54,7 @@ export const site = {
   },
 
   contact: {
-    heading: "Let's build yours.",
+    heading: "Let’s build yours.",
     // PLACEHOLDERS. While `placeholder` is true the links are shown but go nowhere.
     // Fill in the real details, then set it to false.
     placeholder: true,

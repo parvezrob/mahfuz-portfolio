@@ -1,16 +1,21 @@
 @import "tailwindcss";
 
 @theme inline {
+  /* Below this width the page uses its tall-screen layout (phones and portrait tablets). */
+  --breakpoint-md: 56.25rem;
   --color-paper: #dbd3c7;
   --color-ink: #1b1815;
   --color-red: #c8301e;
   --color-cream: #f4ecdf;
   --color-brass: #96783f;
-  --font-sans: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--font-display), "Helvetica Neue", Arial, sans-serif;
+  --font-serif: var(--font-text), "Iowan Old Style", Georgia, serif;
 }
 
 html {
-  --nav: #1b1815;
+  --nav-l: #1b1815;
+  --nav-r: #1b1815;
+  --nav-dot: #c8301e;
   background: var(--color-paper);
   color: var(--color-ink);
   -webkit-text-size-adjust: 100%;
@@ -19,9 +24,21 @@ html {
 body {
   font-family: var(--font-sans);
   font-synthesis: none;
+  font-kerning: normal;
+  font-feature-settings: "kern", "liga", "calt";
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   overflow-x: clip;
+}
+
+/* Keyboard focus is shown with a fine line in the text's own colour; a mouse press shows none. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 1.5px solid currentColor;
+  outline-offset: 5px;
+  border-radius: 2px;
 }
 
 ::selection {
@@ -41,25 +58,54 @@ html.lenis body {
   overflow: clip;
 }
 
-/* Type. Archivo carries a width axis; wide for display, normal for reading. */
+/* Type. Display and labels are Mona Sans, set wide; reading text is Newsreader.
+   --wdth is animated: the hero name ripples on it and the big words inflate on it. */
 .display {
-  font-variation-settings: "wdth" var(--wdth, 118);
-  font-weight: 760;
-  line-height: 0.86;
-  letter-spacing: -0.035em;
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" var(--wdth, 125);
+  font-weight: 650;
+  line-height: 0.88;
+  letter-spacing: -0.042em;
+  /* Wide capitals carry a visible side bearing; pull each line back so it sits on the margin. */
+  margin-left: -0.05em;
+  text-wrap: balance;
 }
 .reading {
-  font-variation-settings: "wdth" 100;
-  font-weight: 430;
-  line-height: 1.28;
-  letter-spacing: -0.012em;
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-weight: 400;
+  line-height: 1.24;
+  letter-spacing: -0.006em;
+  text-wrap: pretty;
 }
 .small {
-  font-variation-settings: "wdth" 104;
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 108;
   font-weight: 520;
-  font-size: 0.8125rem;
+  font-size: clamp(0.8125rem, 0.86vw, 1rem);
   line-height: 1.3;
-  letter-spacing: 0.005em;
+  letter-spacing: 0.012em;
+}
+/* One size for every sentence that is meant to be read. */
+.read-size {
+  font-size: clamp(1.2rem, 1.62vw, 1.85rem);
+}
+.verb {
+  --on: 0;
+  color: color-mix(in srgb, var(--color-red) calc(var(--on) * 100%), currentColor);
+  transition: color 0.25s;
+}
+/* Hidden until the script has set every start state; see Film.tsx. Shown outright without JS. */
+.film-gate {
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+.label {
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 108;
+  font-weight: 540;
+  line-height: 1.2;
+  letter-spacing: 0.004em;
 }
 
 /* A plate that always covers the viewport. Children are placed in fractions of the
@@ -70,8 +116,9 @@ html.lenis body {
   --cam: 0.5;
   --ay: 0.5;
   --zoom: 1;
-  --w: max(100vw, calc(100svh * var(--ar)));
-  --h: max(100svh, calc(100vw / var(--ar)));
+  --vh: 100lvh;
+  --w: max(100vw, calc(var(--vh) * var(--ar)));
+  --h: max(var(--vh), calc(100vw / var(--ar)));
   position: absolute;
   left: 50%;
   top: 50%;
@@ -79,12 +126,12 @@ html.lenis body {
   height: var(--h);
   transform: translate(
       calc(-50% - (var(--w) - 100vw) * (var(--cam) - 0.5)),
-      calc(-50% - (var(--h) - 100svh) * (var(--ay) - 0.5))
+      calc(-50% - (var(--h) - var(--vh)) * (var(--ay) - 0.5))
     )
     scale(var(--zoom));
   will-change: transform;
 }
-.stage > img.plate {
+.stage img.plate {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -164,6 +211,44 @@ html.lenis body {
   pointer-events: none;
 }
 
+/* The photographed plaster wall behind the flat sections, feathered into the page at both ends. */
+.wall {
+  background: var(--color-paper) url("/art/wall-tall.webp") left top / cover no-repeat;
+}
+@media (min-width: 900px) {
+  .wall {
+    background-image: url("/art/wall.webp");
+  }
+}
+.wall::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--color-paper), transparent 16%, transparent 84%, var(--color-paper));
+}
+
+/* One object of the Build flat-lay, cut from the full photograph and feathered at its edges,
+   so it can be set down on the empty surface on its own. */
+.build-part {
+  position: absolute;
+  background-image: url("/art/build-1x.webp");
+  background-repeat: no-repeat;
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent),
+    linear-gradient(to bottom, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+  mask-image:
+    linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent),
+    linear-gradient(to bottom, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+@media (min-width: 900px) {
+  .build-part {
+    background-image: url("/art/build-2x.webp");
+  }
+}
+
 .layer {
   position: absolute;
   inset: 0;
@@ -177,23 +262,85 @@ html.lenis body {
   padding-bottom: 0.12em;
   margin-bottom: -0.12em;
 }
+/* No will-change here: text parked on its own layer loses its crisp rasterisation. */
 .word {
   display: inline-block;
-  will-change: transform;
 }
 
-.grain::after {
+/* Fine grain belongs to the photographs and the red field, never to the type: it is drawn
+   inside each plate and under the red scene's text, so letters stay clean. */
+.stage::after,
+.red-grain::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
-  opacity: 0.11;
+  opacity: 0.1;
   mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
+.red-grain::before {
+  z-index: 0;
+}
+/* A full-screen blend layer is expensive on a phone, and the photographs carry their own grain. */
+@media (max-width: 899px) {
+  .stage::after,
+  .red-grain::before {
+    display: none;
+  }
+}
 
+/* Until the script runs (or if it never does) only the first scene of the film shows. */
+.film-gate > .layer ~ .layer {
+  visibility: hidden;
+}
+
+/* Reduced motion: no film. Every scene is a finished still, one under the other, and the
+   gallery wraps so every print can be reached. */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  #top {
+    height: auto !important;
+  }
+  .film-gate {
+    position: static;
+    height: auto;
+    overflow: visible;
+    opacity: 1;
+  }
+  .film-gate > .layer,
+  .film-gate > .layer ~ .layer {
+    position: relative;
+    height: 100lvh;
+    visibility: visible;
+  }
+  .caught {
+    display: none;
+  }
+  .say-2 {
+    position: static !important;
+    translate: 0 0 !important;
+    margin-top: 0.5em;
+  }
+  #grow {
+    margin-top: 0 !important;
+    height: 100lvh !important;
+  }
+  #work {
+    height: auto !important;
+  }
+  .sample-stage {
+    position: static;
+    height: auto;
+  }
+  .sample-track {
+    width: auto;
+    height: auto;
+    flex-wrap: wrap;
+    row-gap: 10lvh;
+    padding-block: 14lvh;
   }
 }
